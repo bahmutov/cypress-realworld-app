@@ -1,0 +1,86 @@
+name: ci
+on: [push]
+
+jobs:
+  install:
+    runs-on: ubuntu-20.04
+    steps:
+      # https://github.com/actions/checkout
+      - name: Checkout 🛎️
+        uses: actions/checkout@v2
+
+      # only install dependencies using
+      # https://github.com/cypress-io/github-action
+      # Since this project uses Yarn, the action restores or creates folders
+      #   ~/.cache/yarn
+      #   ~/.cache/Cypress
+      - name: Install 📦
+        uses: cypress-io/github-action@v2
+        with:
+          runTests: false
+
+      - name: Run lint 🧹
+        run: yarn types
+
+      - name: Run unit tests 🧪
+        run: yarn test:unit:ci
+
+      # will create the "build" folder
+      - name: Build site 🏗
+        run: yarn build:ci
+
+      # only pass the local folders we built / updated
+      #   ./build
+      # TIP: we want to avoid uploading node_modules since it is SLOW
+      # https://glebbahmutov.com/blog/parallel-cypress-tests-gh-action/
+      - name: Save build folder 🆙
+        uses: actions/upload-artifact@v2
+        with:
+          name: built
+          path: |
+            build
+
+  ui-chrome-tests:
+    runs-on: ubuntu-20.04
+    needs: install
+    timeout-minutes: 15
+    strategy:
+      # when one test fails, DO NOT cancel the other
+      # containers, because this will kill Cypress processes
+      # leaving the Dashboard hanging ...
+      # https://github.com/cypress-io/github-action/issues/48
+      fail-fast: false
+      matrix:
+        # run 4 copies of the current job in parallel
+        containers: [1, 2, 3, 4, 5]
+    steps:
+      # https://github.com/actions/checkout
+      - name: Checkout 🛎️
+        uses: actions/checkout@v2
+
+      - name: Download built folders ⏬
+        uses: actions/download-artifact@v2
+        with:
+          name: built
+
+      # reinstall dependencies and run Cypress tests
+      - name: Cypress tests 🧪
+        uses: cypress-io/github-action@v2
+        # run all tests straight from Markdown files
+        # using Cypress GH action
+        # https://github.com/cypress-io/github-action
+        with:
+          # start the local server
+          start: yarn start:ci
+          wait-on: "http://localhost:3000"
+          wait-on-timeout: 120
+          # running tests parameters
+          browser: chrome
+          record: true
+          parallel: true
+          group: "UI - Chrome"
+          spec: cypress/tests/ui/*
+        env:
+          CYPRESS_RECORD_KEY: ${{ secrets.recordKey }}
+          # pass GitHub token to allow accurately detecting a build vs a re-run build
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
